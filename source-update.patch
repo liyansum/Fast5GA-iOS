@@ -1,0 +1,233 @@
+diff --git a/.github/release-notes.md b/.github/release-notes.md
+new file mode 100644
+index 0000000..d948fa5
+--- /dev/null
++++ b/.github/release-notes.md
+@@ -0,0 +1,12 @@
++开启5GA iPhone 端 1.0.1
++
++- 将载荷目录改为 CarrierPayloads，避免与 CoreFoundation 的旧式 Resources Bundle 布局冲突。
++- 新增 Foundation/CFBundle 实际解析检查，覆盖 LiveContainer 式目录改名和 Mach-O 类型修改。
++- 仓库改为完整、可编辑的源码目录。
++- IPA、SHA256 校验文件作为两个独立 Release 附件发布，无需再解压产物 ZIP。
++
++适用配置：iPhone 14 Pro（iPhone15,2）/ iOS 27.0.1 / 中国联通。
++
++在 LiveContainer 中重新导入本版 IPA。连接 Wi-Fi、保持 LocalDevVPN 开启后，在应用中配对并检查连接；首次执行完整模式，之后每次手机重启后执行普通模式。
++
++已通过编译、载荷校验、原生单元测试及 CFBundle 路径检查；仍需在目标 iPhone / LiveContainer 上确认实际启动、配对和写入效果。
+diff --git a/App/AppModel.swift b/App/AppModel.swift
+index d2b9753..ca34a15 100644
+--- a/App/AppModel.swift
++++ b/App/AppModel.swift
+@@ -109,7 +109,7 @@ final class AppModel: ObservableObject {
+         guard network.wifi != nil else { notify("请先连接 Wi-Fi，并保持 LocalDevVPN 开启。"); return }
+         var address = in_addr()
+         guard inet_pton(AF_INET, targetHost, &address) == 1 else { notify("Device IP 格式不正确。"); return }
+-        guard let resources = Bundle.main.resourceURL?.appendingPathComponent("Resources"),
++        guard let resources = Optional(Bundle.main.bundleURL.appendingPathComponent("CarrierPayloads")),
+               FileManager.default.fileExists(atPath: resources.appendingPathComponent("payloads.json").path) else {
+             notify("应用载荷不完整，请重新导入完整 IPA。"); return
+         }
+diff --git a/App/Resources/Unicom_cn_73.0_original.ipcc b/App/CarrierPayloads/Unicom_cn_73.0_original.ipcc
+similarity index 100%
+rename from App/Resources/Unicom_cn_73.0_original.ipcc
+rename to App/CarrierPayloads/Unicom_cn_73.0_original.ipcc
+diff --git a/App/Resources/original_ipcc.json b/App/CarrierPayloads/original_ipcc.json
+similarity index 100%
+rename from App/Resources/original_ipcc.json
+rename to App/CarrierPayloads/original_ipcc.json
+diff --git a/App/Resources/payloads.json b/App/CarrierPayloads/payloads.json
+similarity index 100%
+rename from App/Resources/payloads.json
+rename to App/CarrierPayloads/payloads.json
+diff --git a/App/Resources/unicom.der.pri b/App/CarrierPayloads/unicom.der.pri
+similarity index 100%
+rename from App/Resources/unicom.der.pri
+rename to App/CarrierPayloads/unicom.der.pri
+diff --git a/App/Resources/unicom_72.0.1.plist b/App/CarrierPayloads/unicom_72.0.1.plist
+similarity index 100%
+rename from App/Resources/unicom_72.0.1.plist
+rename to App/CarrierPayloads/unicom_72.0.1.plist
+diff --git a/App/Resources/unicom_73.0.plist b/App/CarrierPayloads/unicom_73.0.plist
+similarity index 100%
+rename from App/Resources/unicom_73.0.plist
+rename to App/CarrierPayloads/unicom_73.0.plist
+diff --git a/App/Resources/unicom_Info.plist b/App/CarrierPayloads/unicom_Info.plist
+similarity index 100%
+rename from App/Resources/unicom_Info.plist
+rename to App/CarrierPayloads/unicom_Info.plist
+diff --git a/App/Resources/unicom_carrier.plist b/App/CarrierPayloads/unicom_carrier.plist
+similarity index 100%
+rename from App/Resources/unicom_carrier.plist
+rename to App/CarrierPayloads/unicom_carrier.plist
+diff --git a/App/Resources/unicom_common_signature.plist b/App/CarrierPayloads/unicom_common_signature.plist
+similarity index 100%
+rename from App/Resources/unicom_common_signature.plist
+rename to App/CarrierPayloads/unicom_common_signature.plist
+diff --git a/App/Resources/unicom_overrides.plist b/App/CarrierPayloads/unicom_overrides.plist
+similarity index 100%
+rename from App/Resources/unicom_overrides.plist
+rename to App/CarrierPayloads/unicom_overrides.plist
+diff --git a/App/Resources/unicom_signature.plist b/App/CarrierPayloads/unicom_signature.plist
+similarity index 100%
+rename from App/Resources/unicom_signature.plist
+rename to App/CarrierPayloads/unicom_signature.plist
+diff --git a/README.md b/README.md
+index 97ac011..6b5c298 100644
+--- a/README.md
++++ b/README.md
+@@ -34,7 +34,7 @@
+ 
+ 私有仓库使用 GitHub Actions 的 macOS runner 编译，无须 Apple 开发证书。工作流仅在私有仓库执行，输出未签名 `Fast5GA.ipa`，供 LiveContainer 导入；这不是 App Store 安装包。
+ 
+-仓库根目录的 `Fast5GA-source.zip` 是完整源码快照。云端解包后运行：
++仓库直接保存 `App/`、`rust-core/`、`scripts/`、`project.yml` 等可编辑源码。云端从当前提交运行：
+ 
+ ```sh
+ python3 scripts/validate.py
+@@ -43,9 +43,13 @@ bash scripts/build-core.sh
+ bash scripts/build-ipa.sh
+ ```
+ 
+-在 Actions → Build private IPA → 成功的运行中，下载 `Fast5GA-LiveContainer`。工作流不自动发布 Release，构建产物保留 14 天。
++在仓库的 **Releases** 中打开最新版本，分别下载 `Fast5GA.ipa` 和 `SHA256SUMS.txt`。两个文件直接作为附件发布，无需到 Actions 下载或解压产物 ZIP。构建和 CFBundle 路径检查通过后才会发布。
+ 
+-源码快照也可以直接解包到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
++源码可以直接克隆到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
++
++## 1.0.1 启动修复
++
++载荷目录从应用根部的 `Resources` 改为 `CarrierPayloads`，避免与 CoreFoundation 的旧式 Bundle 布局目录冲突。打包后通过 Foundation/CFBundle 实际解析原名称和 LiveContainer 式改名后的 `.app`，检查可执行文件 URL 与元数据，而不只检查 ZIP 文件名是否存在。对照测试保留旧目录布局，记录它的解析结果。
+ 
+ ## 验证范围
+ 
+diff --git a/project.yml b/project.yml
+index 781f29f..ad58f7c 100644
+--- a/project.yml
++++ b/project.yml
+@@ -6,8 +6,8 @@ options:
+ settings:
+   base:
+     SWIFT_VERSION: '5.0'
+-    MARKETING_VERSION: '1.0.0'
+-    CURRENT_PROJECT_VERSION: '1'
++    MARKETING_VERSION: '1.0.1'
++    CURRENT_PROJECT_VERSION: '2'
+     TARGETED_DEVICE_FAMILY: '1'
+     CODE_SIGNING_ALLOWED: NO
+     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+@@ -18,8 +18,8 @@ targets:
+     sources:
+       - path: App
+         excludes:
+-          - Resources
+-      - path: App/Resources
++          - CarrierPayloads
++      - path: App/CarrierPayloads
+         type: folder
+         buildPhase: resources
+     dependencies:
+diff --git a/rust-core/src/carrier.rs b/rust-core/src/carrier.rs
+index 6933d70..1b1fad5 100644
+--- a/rust-core/src/carrier.rs
++++ b/rust-core/src/carrier.rs
+@@ -926,7 +926,7 @@ mod tests {
+     fn bundled_payloads_valid() {
+         payloads(
+             Path::new(env!("CARGO_MANIFEST_DIR"))
+-                .join("../App/Resources")
++                .join("../App/CarrierPayloads")
+                 .as_path(),
+         )
+         .unwrap();
+diff --git a/scripts/build-core.sh b/scripts/build-core.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/build-ipa.sh b/scripts/build-ipa.sh
+old mode 100644
+new mode 100755
+index 0f8ed07..e48c821
+--- a/scripts/build-ipa.sh
++++ b/scripts/build-ipa.sh
+@@ -12,5 +12,6 @@ test -d "$app_path"
+ mkdir -p build/Payload
+ cp -R "$app_path" build/Payload/Fast5GA.app
+ python3 scripts/validate-ipa.py build/Payload/Fast5GA.app
++xcrun swift scripts/verify-bundle.swift build/Payload/Fast5GA.app
+ (cd build && /usr/bin/zip -qry Fast5GA.ipa Payload)
+ (cd build && shasum -a 256 Fast5GA.ipa > SHA256SUMS.txt)
+diff --git a/scripts/validate-ipa.py b/scripts/validate-ipa.py
+index 015e064..5aed336 100644
+--- a/scripts/validate-ipa.py
++++ b/scripts/validate-ipa.py
+@@ -5,7 +5,10 @@ app=Path(sys.argv[1]); p=plistlib.loads((app/'Info.plist').read_bytes())
+ assert p['CFBundleIdentifier']=='com.liyansum.fast5ga'
+ assert p['CFBundleExecutable']=='Fast5GA'
+ binary=app/p['CFBundleExecutable']; assert binary.stat().st_size>0
+-resources=app/'Resources'
++assert binary.stat().st_mode & 0o111
++assert not (app/'Resources').exists(), 'Resources changes CFBundle layout detection'
++assert p['CFBundleShortVersionString']=='1.0.1'
++resources=app/'CarrierPayloads'
+ for name,entry in json.loads((resources/'payloads.json').read_text()).items():
+     b=(resources/name).read_bytes()
+     assert len(b)==entry['size'] and hashlib.sha384(b).hexdigest()==entry['sha384'],name
+diff --git a/scripts/validate.py b/scripts/validate.py
+index 04fa821..d9e11a0 100644
+--- a/scripts/validate.py
++++ b/scripts/validate.py
+@@ -3,7 +3,7 @@
+ import hashlib,json,plistlib,zipfile,io
+ from pathlib import Path
+ root=Path(__file__).resolve().parents[1]
+-r=root/'App/Resources'
++r=root/'App/CarrierPayloads'
+ manifest=json.loads((r/'payloads.json').read_text())
+ for name,entry in manifest.items():
+     b=(r/name).read_bytes()
+diff --git a/scripts/verify-bundle.swift b/scripts/verify-bundle.swift
+new file mode 100644
+index 0000000..b48d831
+--- /dev/null
++++ b/scripts/verify-bundle.swift
+@@ -0,0 +1,39 @@
++import Foundation
++import CoreFoundation
++
++let fm = FileManager.default
++let input = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).standardizedFileURL
++let temp = fm.temporaryDirectory.appendingPathComponent("Fast5GA-BundleCheck-" + UUID().uuidString, isDirectory: true)
++try fm.createDirectory(at: temp, withIntermediateDirectories: true)
++defer { try? fm.removeItem(at: temp) }
++
++func inspect(_ url: URL, requireValid: Bool) throws {
++    guard let bundle = CFBundleCreate(nil, url as CFURL) else { fatalError("CFBundleCreate failed: \(url.path)") }
++    let executable = CFBundleCopyExecutableURL(bundle) as URL?
++    let identifier = CFBundleGetIdentifier(bundle) as String?
++    let info = CFBundleGetInfoDictionary(bundle) as NSDictionary?
++    print("BUNDLE CHECK \(url.lastPathComponent): identifier=\(identifier ?? "nil"), executable=\(executable?.path ?? "nil"), resources=\(CFBundleCopyResourcesDirectoryURL(bundle) as URL?)")
++    if requireValid {
++        precondition(identifier == "com.liyansum.fast5ga", "Bundle metadata not found")
++        precondition(info?["CFBundleExecutable"] as? String == "Fast5GA", "Executable metadata not found")
++        precondition(executable?.lastPathComponent == "Fast5GA", "Executable path not found")
++        precondition(fm.isExecutableFile(atPath: executable!.path), "Executable permissions lost")
++    }
++}
++try inspect(input, requireValid: true)
++let renamed = temp.appendingPathComponent("com.liyansum.fast5ga.app", isDirectory: true)
++try fm.copyItem(at: input, to: renamed)
++// LiveContainer changes MH_EXECUTE to MH_DYLIB before resolving the bundle.
++let executable = renamed.appendingPathComponent("Fast5GA")
++var macho = try Data(contentsOf: executable)
++precondition(Array(macho.prefix(4)) == [0xcf,0xfa,0xed,0xfe], "Expected arm64 Mach-O")
++macho.replaceSubrange(12..<16, with: [UInt8(6),0,0,0])
++try macho.write(to: executable)
++try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
++try inspect(renamed, requireValid: true)
++// Reproduce the original packaging layout for a direct comparison on Apple CFBundle.
++let legacy = temp.appendingPathComponent("LegacyLayout.app", isDirectory: true)
++try fm.copyItem(at: renamed, to: legacy)
++try fm.moveItem(at: legacy.appendingPathComponent("CarrierPayloads"), to: legacy.appendingPathComponent("Resources"))
++try inspect(legacy, requireValid: false)
++print("PASS: CoreFoundation resolved executable before and after LiveContainer-style rename/patch")
