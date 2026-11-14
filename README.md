@@ -34,7 +34,7 @@
 
 私有仓库使用 GitHub Actions 的 macOS runner 编译，无须 Apple 开发证书。工作流仅在私有仓库执行，输出未签名 `Fast5GA.ipa`，供 LiveContainer 导入；这不是 App Store 安装包。
 
-仓库根目录的 `Fast5GA-source.zip` 是完整源码快照。云端解包后运行：
+仓库直接保存 `App/`、`rust-core/`、`scripts/`、`project.yml` 等可编辑源码。云端从当前提交运行：
 
 ```sh
 python3 scripts/validate.py
@@ -43,9 +43,13 @@ bash scripts/build-core.sh
 bash scripts/build-ipa.sh
 ```
 
-在 Actions → Build private IPA → 成功的运行中，下载 `Fast5GA-LiveContainer`。工作流不自动发布 Release，构建产物保留 14 天。
+在仓库的 **Releases** 中打开最新版本，分别下载 `Fast5GA.ipa` 和 `SHA256SUMS.txt`。两个文件直接作为附件发布，无需到 Actions 下载或解压产物 ZIP。构建和 CFBundle 路径检查通过后才会发布。
 
-源码快照也可以直接解包到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
+源码可以直接克隆到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
+
+## 1.0.1 启动修复
+
+载荷目录从应用根部的 `Resources` 改为 `CarrierPayloads`，避免与 CoreFoundation 的旧式 Bundle 布局目录冲突。打包后通过 Foundation/CFBundle 实际解析原名称和 LiveContainer 式改名后的 `.app`，检查可执行文件 URL 与元数据，而不只检查 ZIP 文件名是否存在。对照测试保留旧目录布局，记录它的解析结果。
 
 ## 验证范围
 

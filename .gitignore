@@ -1,0 +1,9 @@
+.DS_Store
+build/
+*.xcodeproj/
+AirliftFFI.xcframework/
+rust-core/target/
+*.rppairing
+*.mobiledevicepairing
+*pairing*.plist
+*.log
