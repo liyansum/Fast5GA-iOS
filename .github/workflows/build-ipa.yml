@@ -1,0 +1,59 @@
+name: Build private IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: fast5ga-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.private == true
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: source/Fast5GA
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source snapshot
+        working-directory: .
+        run: unzip -q Fast5GA-source.zip -d source
+      - name: Select installed Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+      - name: Install build tools
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          rustup toolchain install 1.100.0 --profile minimal
+          rustup target add --toolchain 1.100.0 aarch64-apple-ios
+      - name: Verify payloads and menu parity
+        run: python3 scripts/validate.py
+      - name: Test native workflow
+        run: cargo +1.100.0 test --locked --manifest-path rust-core/Cargo.toml --lib
+      - name: Compile native core and package framework
+        run: bash scripts/build-core.sh
+      - name: Compile iPhone app and package IPA
+        run: bash scripts/build-ipa.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fast5GA-LiveContainer
+          path: |
+            source/Fast5GA/build/Fast5GA.ipa
+            source/Fast5GA/build/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload compiler logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fast5GA-build-logs
+          path: source/Fast5GA/build/*.log
+          if-no-files-found: ignore
+          retention-days: 7
