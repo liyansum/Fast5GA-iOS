@@ -50,7 +50,7 @@ private struct WriteView: View {
             }
             Surface {
                 Label("使用顺序", systemImage: "sparkles").font(.headline)
-                Text("首次：连接 Wi-Fi → 配对 → 完整模式。\n以后每次重启手机：执行普通模式。\n保存配对后可关闭 Wi-Fi，保持 VPN 开启，再检查连接。").font(.subheadline).foregroundStyle(.secondary).lineSpacing(6)
+                Text("首次：连接 Wi-Fi → 配对 → 完整模式。\n以后每次重启手机：执行普通模式（写入后重载，不再补写）。\n保存配对后可关闭 Wi-Fi，保持 VPN 开启，再检查连接。").font(.subheadline).foregroundStyle(.secondary).lineSpacing(6)
                 Divider().overlay(.white.opacity(0.05))
                 Text("上次完成：\(model.lastResult)").font(.caption).foregroundStyle(.secondary)
             }
