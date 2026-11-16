@@ -225,7 +225,7 @@ async fn dial_once(
     );
 
     let cap = left.min(DIAL_ATTEMPT_TIMEOUT);
-    match tokio::time::timeout(cap, TcpStream::connect(addr)).await {
+    match tokio::time::timeout(cap, crate::tunnel_socket::connect(addr)).await {
         Ok(Ok(stream)) => {
             info!("tunnel dial: {addr} accepted the connection in round {round}");
             DialOutcome::Connected(stream)
@@ -685,7 +685,7 @@ pub async fn tunnel_create_remotexpc_multihost_async(
     extras: &[IpAddr],
 ) -> Result<(TcpAdapterHandle, RsdHandshake), TunnelFailure> {
     // RSD handshake to discover tunnel service
-    let rsd_stream = tokio::net::TcpStream::connect(socket_addr)
+    let rsd_stream = crate::tunnel_socket::connect(socket_addr)
         .await
         .map_err(|e| {
             TunnelFailure::new(
@@ -714,7 +714,7 @@ pub async fn tunnel_create_remotexpc_multihost_async(
 
     // Connect to tunnel service via RemoteXPC
     let ts_addr = std::net::SocketAddr::new(socket_addr.ip(), ts.port);
-    let ts_stream = tokio::net::TcpStream::connect(ts_addr)
+    let ts_stream = crate::tunnel_socket::connect(ts_addr)
         .await
         .map_err(|e| {
             TunnelFailure::new(
@@ -750,7 +750,7 @@ pub async fn tunnel_create_rppairing_multihost_async(
     extras: &[IpAddr],
 ) -> Result<(TcpAdapterHandle, RsdHandshake), TunnelFailure> {
     info!("tunnel dial: opening the RPPairing connection to {socket_addr}");
-    let stream = TcpStream::connect(socket_addr).await.map_err(|e| {
+    let stream = crate::tunnel_socket::connect(socket_addr).await.map_err(|e| {
         warn!(
             "tunnel dial: RPPairing connect to {socket_addr} failed: {e} (kind {:?}, os error {:?})",
             e.kind(),

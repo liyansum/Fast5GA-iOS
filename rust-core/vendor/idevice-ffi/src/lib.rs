@@ -71,6 +71,8 @@ pub mod syslog_relay;
 pub mod tcp_object_stack;
 #[cfg(feature = "tunnel_tcp_stack")]
 pub mod tunnel_provider;
+#[cfg(feature = "tunnel_tcp_stack")]
+pub mod tunnel_socket;
 #[cfg(feature = "usbmuxd")]
 pub mod usbmuxd;
 pub mod util;
