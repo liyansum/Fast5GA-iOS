@@ -10,11 +10,22 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    if: github.event.repository.private == true
     runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+      - name: Apply reviewed connection fix
+        if: hashFiles('fast5ga-1.0.2.patch') != ''
+        run: |
+          set -euo pipefail
+          git apply --check fast5ga-1.0.2.patch
+          git apply fast5ga-1.0.2.patch
+          git rm fast5ga-1.0.2.patch
+          git add .
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fix dynamic Remote Pairing ports for Fast5GA 1.0.2'
+          git push origin HEAD:main
       - name: Check Xcode
         run: |
           xcodebuild -version
@@ -28,6 +39,10 @@ jobs:
         run: python3 scripts/validate.py
       - name: Test native workflow
         run: cargo +1.100.0 test --locked --manifest-path rust-core/Cargo.toml --lib
+      - name: Test service discovery
+        run: |
+          xcrun swiftc App/RemotePairingPortResolver.swift tests/port-discovery/main.swift -o "$RUNNER_TEMP/test-port-discovery"
+          "$RUNNER_TEMP/test-port-discovery"
       - name: Build native framework
         run: bash scripts/build-core.sh
       - name: Build and verify iPhone app
@@ -45,5 +60,5 @@ jobs:
             gh release upload "$tag" build/Fast5GA.ipa build/SHA256SUMS.txt --clobber
             gh release edit "$tag" --title "Fast5GA $version" --notes-file .github/release-notes.md
           else
-            gh release create "$tag" build/Fast5GA.ipa build/SHA256SUMS.txt --target "$GITHUB_SHA" --title "Fast5GA $version" --notes-file .github/release-notes.md
+            gh release create "$tag" build/Fast5GA.ipa build/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --title "Fast5GA $version" --notes-file .github/release-notes.md
           fi
