@@ -7,7 +7,7 @@ assert p['CFBundleExecutable']=='Fast5GA'
 binary=app/p['CFBundleExecutable']; assert binary.stat().st_size>0
 assert binary.stat().st_mode & 0o111
 assert not (app/'Resources').exists(), 'Resources changes CFBundle layout detection'
-assert p['CFBundleShortVersionString']=='1.0.2'
+assert p['CFBundleShortVersionString']=='1.0.3'
 resources=app/'CarrierPayloads'
 for name,entry in json.loads((resources/'payloads.json').read_text()).items():
     b=(resources/name).read_bytes()
