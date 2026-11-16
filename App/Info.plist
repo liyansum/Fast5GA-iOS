@@ -29,6 +29,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_remotepairing-pairable-host._tcp</string>
+		<string>_remotepairing._tcp</string>
 		<string>_fast5gaprobe._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>

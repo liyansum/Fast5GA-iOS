@@ -32,7 +32,7 @@
 
 ## GitHub 编译
 
-私有仓库使用 GitHub Actions 的 macOS runner 编译，无须 Apple 开发证书。工作流仅在私有仓库执行，输出未签名 `Fast5GA.ipa`，供 LiveContainer 导入；这不是 App Store 安装包。
+使用 GitHub Actions 的 macOS runner 编译，支持公开或私有仓库，无须 Apple 开发证书。输出未签名 `Fast5GA.ipa`，供 LiveContainer 导入；这不是 App Store 安装包。
 
 仓库直接保存 `App/`、`rust-core/`、`scripts/`、`project.yml` 等可编辑源码。云端从当前提交运行：
 
@@ -46,6 +46,20 @@ bash scripts/build-ipa.sh
 在仓库的 **Releases** 中打开最新版本，分别下载 `Fast5GA.ipa` 和 `SHA256SUMS.txt`。两个文件直接作为附件发布，无需到 Actions 下载或解压产物 ZIP。构建和 CFBundle 路径检查通过后才会发布。
 
 源码可以直接克隆到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
+
+## 1.0.2 连接修复
+
+1.0.1 固定拨号 49152，当前系统的 Remote Pairing 服务若改用其他端口，会出现连接被拒绝，即使其他工具和 VPN 正常。1.0.2 在每次操作前通过 `_remotepairing._tcp` 发现本机服务端口；首次连接、raw RPPairing 回退和缓存均使用选定端口。仅接受本机接口对应的服务，防止使用附近其他设备的端口；发现过程只解析 Bonjour，不打开 Remote Pairing 控制连接。
+
+“配对”页面的服务端口留空时自动发现，发现失败先尝试同一 Device IP 上次成功的端口，无成功记录时回退到 49152，并在日志标明来源。也可填写 SideStore 网络发现或 StikDebug 显示的当前 Remote Pairing 端口。它不是配对 PIN，也不是应用配对主机临时发布的端口。端口变化不意味着配对密钥失效，不必先删除原有配对。
+
+连接失败会保留配置 Device IP 的首个错误，并记录实际端点；不再用备用地址的最后一次超时覆盖它，也不再一律判断 VPN 未开启。
+
+### 不连接 Wi-Fi / 飞行模式
+
+保存配对后的检查连接和写入不再要求 Wi-Fi，且载荷均已内置，不需要互联网。首次配对仍在 Wi-Fi 下完成。先在 Wi-Fi 下完成一次连接检查，再保持 LocalDevVPN 开启，开启飞行模式并关闭 Wi-Fi，回到程序检查连接；通过后再写入。自动发现不可用时会尝试同一 Device IP 上次成功的端口，也可手动填写。检查失败则停止，不会将 VPN 接口存在视为服务可用。
+
+此版本仅解除程序的 Wi-Fi 前置限制，并提供本机服务发现和端口回退；尚未在目标 iPhone / iOS 27.0.1 验证飞行模式下新建连接及完整写入。定位工具可保留已经建立的会话，不能仅据此推断新连接和所有服务都可用。
 
 ## 1.0.1 启动修复
 

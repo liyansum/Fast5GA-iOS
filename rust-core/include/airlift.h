@@ -167,7 +167,7 @@ void al_clear_target_hosts(void);
 
 // Fixed carrier workflow; out is JSON on success, an error on failure.
 int32_t fg_run(const char *mode, const char *pairing, const char *resources,
-               const char *host, ALLogCallback cb, void *ctx, char **out);
+               const char *host, uint16_t port, ALLogCallback cb, void *ctx, char **out);
 void fg_pair_cancel(void);
 
 #ifdef __cplusplus

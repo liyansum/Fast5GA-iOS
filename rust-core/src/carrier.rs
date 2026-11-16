@@ -816,6 +816,7 @@ pub unsafe extern "C" fn fg_run(
     pairing: *const c_char,
     dir: *const c_char,
     host: *const c_char,
+    port: u16,
     cb: ALLogCallback,
     ctx: *mut c_void,
     out: *mut *mut c_char,
@@ -836,8 +837,13 @@ pub unsafe extern "C" fn fg_run(
         *out = cstr("Device IP 必须为 IPv4 地址");
         return 1;
     }
+    if port == 0 {
+        *out = cstr("服务端口不能为 0");
+        return 1;
+    }
     clear_target_hosts();
     set_target_host(Some(host));
+    set_target_port(port);
     let logger = Logger { cb, ctx };
     let result = crate::ffi_util::run_with_large_stack("Fast5GA", move || {
         idevice_ffi::run_sync_local(async {

@@ -1,12 +1,18 @@
-开启5GA iPhone 端 1.0.1
+开启5GA iPhone 端 1.0.2
 
-- 将载荷目录改为 CarrierPayloads，避免与 CoreFoundation 的旧式 Resources Bundle 布局冲突。
-- 新增 Foundation/CFBundle 实际解析检查，覆盖 LiveContainer 式目录改名和 Mach-O 类型修改。
-- 仓库改为完整、可编辑的源码目录。
-- IPA、SHA256 校验文件作为两个独立 Release 附件发布，无需再解压产物 ZIP。
+- 修复 Remote Pairing 固定使用 49152、服务端口变化后无法连接的问题：每次操作前通过 Bonjour 自动发现本机端口。
+- 配对页新增服务端口手动设置；留空为自动发现，可填写 SideStore 网络发现或 StikDebug 显示的当前端口。
+- 原生首次连接、RemoteXPC、raw RPPairing 与连接缓存均使用选定端口。
+- 发现时仅接受本机服务，不选取附近其他设备；发现过程不打开配对控制连接。
+- 失败保留 Device IP 的首个错误，避免被最后一个备用地址的超时覆盖；不再一律提示 VPN 未开启。
+- 保存配对后的连接和写入不再强制要求 Wi-Fi，允许在飞行模式、Wi-Fi 关闭时尝试本机 VPN 通道；首次本机配对仍要求 Wi-Fi。
+- 自动发现不可用时，优先尝试同一 Device IP 上次成功的端口；无成功记录才回退到 49152。
+- 支持公开仓库构建，继续直接发布 IPA 和 SHA256SUMS.txt。
 
-适用配置：iPhone 14 Pro（iPhone15,2）/ iOS 27.0.1 / 中国联通。
+适用配置：iPhone 14 Pro（iPhone15,2）/ iOS 27.0.1 / 中国联通；写入模式与原批处理一致。
 
-在 LiveContainer 中重新导入本版 IPA。连接 Wi-Fi、保持 LocalDevVPN 开启后，在应用中配对并检查连接；首次执行完整模式，之后每次手机重启后执行普通模式。
+在 LiveContainer 更新导入 IPA 后，先用原有配对检查连接，不必因端口变化重新配对。若日志显示默认回退且其他工具正常，请在配对页填写其 Remote Pairing 服务端口，再检查连接。
 
-已通过编译、载荷校验、原生单元测试及 CFBundle 路径检查；仍需在目标 iPhone / LiveContainer 上确认实际启动、配对和写入效果。
+通过云端编译、原生测试、端口与设备选择测试、载荷校验及 CFBundle 路径检查后发布。目标 iPhone 的连接、配对和写入仍需实机确认。
+
+飞行模式使用：先在 Wi-Fi 下完成配对和一次连接检查；保持 LocalDevVPN 开启，开启飞行模式并关闭 Wi-Fi，然后在程序中检查连接，通过后再写入。此路径已解除程序限制，但 iOS 27.0.1 真机可用性尚未验证；若服务不可达会停止，不能以 VPN 图标或接口存在代替连接成功。

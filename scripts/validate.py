@@ -25,5 +25,6 @@ for name,entry in original['files'].items():
     assert len(b)==entry['size'] and hashlib.sha384(b).hexdigest()==entry['sha384'],name
 info=plistlib.loads((root/'App/Info.plist').read_bytes())
 assert '_remotepairing-pairable-host._tcp' in info['NSBonjourServices']
+assert '_remotepairing._tcp' in info['NSBonjourServices']
 assert info['CFBundleDisplayName']=='开启5GA'
 print('PASS: all 9 payload hashes, original IPCC, Overlay fields and pairing metadata')

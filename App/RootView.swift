@@ -50,7 +50,7 @@ private struct WriteView: View {
             }
             Surface {
                 Label("使用顺序", systemImage: "sparkles").font(.headline)
-                Text("首次：连接 Wi-Fi → 配对 → 完整模式。\n以后每次重启手机：执行普通模式。").font(.subheadline).foregroundStyle(.secondary).lineSpacing(6)
+                Text("首次：连接 Wi-Fi → 配对 → 完整模式。\n以后每次重启手机：执行普通模式。\n保存配对后可关闭 Wi-Fi，保持 VPN 开启，再检查连接。").font(.subheadline).foregroundStyle(.secondary).lineSpacing(6)
                 Divider().overlay(.white.opacity(0.05))
                 Text("上次完成：\(model.lastResult)").font(.caption).foregroundStyle(.secondary)
             }
@@ -127,6 +127,9 @@ private struct PairingView: View {
                 Text("LocalDevVPN 的 Device IP").font(.subheadline.bold())
                 TextField("10.7.0.1", text: $model.targetHost).keyboardType(.decimalPad).textInputAutocapitalization(.never).autocorrectionDisabled().font(.system(.body, design: .monospaced)).disabled(model.busy || manager.running)
                 Text("填写 VPN 中的 Device IP。默认 10.7.0.1；程序不会更改 VPN 配置。").font(.caption).foregroundStyle(.secondary)
+                Text("Remote Pairing 服务端口").font(.subheadline.bold())
+                TextField("自动发现（留空）", text: $model.targetPort).keyboardType(.numberPad).font(.system(.body, design: .monospaced)).disabled(model.busy || manager.running)
+                Text("默认自动发现本机端口，发现失败时尝试同一 Device IP 上次成功的端口。若其他工具能连接，可填写 SideStore 网络发现或 StikDebug 显示的 Remote Pairing 端口；这不是配对时的 PIN，也不是配对主机端口。").font(.caption).foregroundStyle(.secondary)
                 Button("检查连接", action: model.check).buttonStyle(.bordered).disabled(!model.canRun)
                 Button("导入已有配对文件") { importing = true }.font(.subheadline).disabled(model.busy || manager.running)
             }

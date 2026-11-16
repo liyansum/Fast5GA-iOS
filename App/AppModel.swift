@@ -33,9 +33,9 @@ struct NetworkSnapshot {
             guard let addr = item.pointee.ifa_addr else { continue }
             let name = String(cString: item.pointee.ifa_name)
             let flags = Int32(item.pointee.ifa_flags)
-            guard flags & IFF_UP != 0, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            guard flags & IFF_UP != 0 else { continue }
             if name.hasPrefix("utun") || name.hasPrefix("ipsec") { tunnel = true }
-            if name == "en0" {
+            if name == "en0", addr.pointee.sa_family == UInt8(AF_INET) {
                 var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                 if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
                     wifi = String(cString: host)
@@ -57,6 +57,8 @@ final class AppModel: ObservableObject {
     @Published var showingAlert = false
     @Published var network = NetworkSnapshot.read()
     @Published var targetHost = UserDefaults.standard.string(forKey: "deviceIP") ?? "10.7.0.1"
+    @Published var targetPort = UserDefaults.standard.string(forKey: "remotePairingPort") ?? ""
+    private let portResolver = RemotePairingPortResolver()
     @Published var lastResult = UserDefaults.standard.string(forKey: "lastResult") ?? "尚未执行"
     let pairing = PairingManager()
     private var timer: Timer?
@@ -82,7 +84,7 @@ final class AppModel: ObservableObject {
     }
     func refreshNetwork() {
         network = .read()
-        if network.wifi == nil { connected = false }
+        if network.wifi == nil && !network.tunnel { connected = false }
     }
     func notify(_ text: String) { alertText = text; showingAlert = true }
     func append(_ line: String) {
@@ -106,7 +108,9 @@ final class AppModel: ObservableObject {
     private func run(mode: String, title: String) {
         guard canRun else { return }
         refreshNetwork()
-        guard network.wifi != nil else { notify("请先连接 Wi-Fi，并保持 LocalDevVPN 开启。"); return }
+        let manualPort: UInt16?
+        do { manualPort = try RemotePairingPort.manual(targetPort) }
+        catch { notify(error.localizedDescription); return }
         var address = in_addr()
         guard inet_pton(AF_INET, targetHost, &address) == 1 else { notify("Device IP 格式不正确。"); return }
         guard let resources = Optional(Bundle.main.bundleURL.appendingPathComponent("CarrierPayloads")),
@@ -114,6 +118,7 @@ final class AppModel: ObservableObject {
             notify("应用载荷不完整，请重新导入完整 IPA。"); return
         }
         UserDefaults.standard.set(targetHost, forKey: "deviceIP")
+        UserDefaults.standard.set(targetPort, forKey: "remotePairingPort")
         busy = true; connected = false; progress = 0; current = title
         UIApplication.shared.isIdleTimerDisabled = true
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Fast5GA") { }
@@ -122,31 +127,42 @@ final class AppModel: ObservableObject {
         logURL = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))_\(mode).log")
         FileManager.default.createFile(atPath: logURL!.path, contents: nil)
         append("开启5GA · \(title)")
+        if network.wifi == nil { append("Wi-Fi 未连接：使用已保存配对尝试本机 VPN 通道，不需要互联网。") }
         let pair = Self.pairingURL.path, path = resources.path, host = targetHost
-        let context = Unmanaged.passRetained(self).toOpaque()
-        DispatchQueue.global(qos: .userInitiated).async {
-            var output: UnsafeMutablePointer<CChar>?
-            let rc = mode.withCString { m in pair.withCString { p in path.withCString { d in host.withCString { h in
-                fg_run(m, p, d, h, operationLog, context, &output)
-            } } } }
-            let message = output.map { String(cString: $0) } ?? "未知结果"
-            if let output { al_string_free(output) }
-            DispatchQueue.main.async {
-                let model = Unmanaged<AppModel>.fromOpaque(context).takeRetainedValue()
-                model.busy = false
-                UIApplication.shared.isIdleTimerDisabled = false
-                if model.backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(model.backgroundTask); model.backgroundTask = .invalid }
-                if rc == 0 {
-                    model.connected = true; model.progress = 1; model.current = mode == "check" ? "连接检查通过" : "操作已完成"
-                    model.append(model.current)
-                    if mode != "check" {
-                        model.lastResult = title + " · " + DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
-                        UserDefaults.standard.set(model.lastResult, forKey: "lastResult")
-                        model.notify(mode == "debug_ipcc" ? "原版 73.0 IPCC 已加载。若用于恢复原版，请手动重启手机。" : "\(title)的步骤已完成。未回读测量目标权限或确认网络效果，请在手机上查看。")
+        Task {
+            current = "正在发现本机服务端口…"
+            let previousPort: UInt16? = UserDefaults.standard.string(forKey: "lastWorkingHost") == host
+                ? UInt16(exactly: UserDefaults.standard.integer(forKey: "lastWorkingPort")) : nil
+            let endpoint = await portResolver.resolve(host: host, manual: manualPort, previousPort: previousPort)
+            append("Remote Pairing 端点：\(host):\(endpoint.value)（\(endpoint.source)）")
+            current = title
+            let context = Unmanaged.passRetained(self).toOpaque()
+            DispatchQueue.global(qos: .userInitiated).async {
+                var output: UnsafeMutablePointer<CChar>?
+                let rc = mode.withCString { m in pair.withCString { p in path.withCString { d in host.withCString { h in
+                    fg_run(m, p, d, h, endpoint.value, operationLog, context, &output)
+                } } } }
+                let message = output.map { String(cString: $0) } ?? "未知结果"
+                if let output { al_string_free(output) }
+                DispatchQueue.main.async {
+                    let model = Unmanaged<AppModel>.fromOpaque(context).takeRetainedValue()
+                    model.busy = false
+                    UIApplication.shared.isIdleTimerDisabled = false
+                    if model.backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(model.backgroundTask); model.backgroundTask = .invalid }
+                    if rc == 0 {
+                        UserDefaults.standard.set(host, forKey: "lastWorkingHost")
+                        UserDefaults.standard.set(Int(endpoint.value), forKey: "lastWorkingPort")
+                        model.connected = true; model.progress = 1; model.current = mode == "check" ? "连接检查通过" : "操作已完成"
+                        model.append(model.current)
+                        if mode != "check" {
+                            model.lastResult = title + " · " + DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
+                            UserDefaults.standard.set(model.lastResult, forKey: "lastResult")
+                            model.notify(mode == "debug_ipcc" ? "原版 73.0 IPCC 已加载。若用于恢复原版，请手动重启手机。" : "\(title)的步骤已完成。未回读测量目标权限或确认网络效果，请在手机上查看。")
+                        }
+                    } else {
+                        model.current = "操作停止"; model.append("失败：" + message)
+                        model.notify(message + "\n\n已停止后续步骤，详情可在日志中查看。")
                     }
-                } else {
-                    model.current = "操作停止"; model.append("失败：" + message)
-                    model.notify(message + "\n\n已停止后续步骤，详情可在日志中查看。")
                 }
             }
         }
