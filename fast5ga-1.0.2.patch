@@ -1,8 +1,8 @@
 diff --git a/.github/release-notes.md b/.github/release-notes.md
-index d948fa5..51a55f8 100644
+index d948fa5..3f4e65b 100644
 --- a/.github/release-notes.md
 +++ b/.github/release-notes.md
-@@ -1,12 +1,14 @@
+@@ -1,12 +1,18 @@
 -开启5GA iPhone 端 1.0.1
 +开启5GA iPhone 端 1.0.2
  
@@ -15,6 +15,8 @@ index d948fa5..51a55f8 100644
 +- 原生首次连接、RemoteXPC、raw RPPairing 与连接缓存均使用选定端口。
 +- 发现时仅接受本机服务，不选取附近其他设备；发现过程不打开配对控制连接。
 +- 失败保留 Device IP 的首个错误，避免被最后一个备用地址的超时覆盖；不再一律提示 VPN 未开启。
++- 保存配对后的连接和写入不再强制要求 Wi-Fi，允许在飞行模式、Wi-Fi 关闭时尝试本机 VPN 通道；首次本机配对仍要求 Wi-Fi。
++- 自动发现不可用时，优先尝试同一 Device IP 上次成功的端口；无成功记录才回退到 49152。
 +- 支持公开仓库构建，继续直接发布 IPA 和 SHA256SUMS.txt。
  
 -适用配置：iPhone 14 Pro（iPhone15,2）/ iOS 27.0.1 / 中国联通。
@@ -25,10 +27,24 @@ index d948fa5..51a55f8 100644
  
 -已通过编译、载荷校验、原生单元测试及 CFBundle 路径检查；仍需在目标 iPhone / LiveContainer 上确认实际启动、配对和写入效果。
 +通过云端编译、原生测试、端口与设备选择测试、载荷校验及 CFBundle 路径检查后发布。目标 iPhone 的连接、配对和写入仍需实机确认。
++
++飞行模式使用：先在 Wi-Fi 下完成配对和一次连接检查；保持 LocalDevVPN 开启，开启飞行模式并关闭 Wi-Fi，然后在程序中检查连接，通过后再写入。此路径已解除程序限制，但 iOS 27.0.1 真机可用性尚未验证；若服务不可达会停止，不能以 VPN 图标或接口存在代替连接成功。
 diff --git a/App/AppModel.swift b/App/AppModel.swift
-index ca34a15..1280197 100644
+index ca34a15..c8ec52c 100644
 --- a/App/AppModel.swift
 +++ b/App/AppModel.swift
+@@ -33,9 +33,9 @@ struct NetworkSnapshot {
+             guard let addr = item.pointee.ifa_addr else { continue }
+             let name = String(cString: item.pointee.ifa_name)
+             let flags = Int32(item.pointee.ifa_flags)
+-            guard flags & IFF_UP != 0, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
++            guard flags & IFF_UP != 0 else { continue }
+             if name.hasPrefix("utun") || name.hasPrefix("ipsec") { tunnel = true }
+-            if name == "en0" {
++            if name == "en0", addr.pointee.sa_family == UInt8(AF_INET) {
+                 var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                 if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                     wifi = String(cString: host)
 @@ -57,6 +57,8 @@ final class AppModel: ObservableObject {
      @Published var showingAlert = false
      @Published var network = NetworkSnapshot.read()
@@ -38,17 +54,27 @@ index ca34a15..1280197 100644
      @Published var lastResult = UserDefaults.standard.string(forKey: "lastResult") ?? "尚未执行"
      let pairing = PairingManager()
      private var timer: Timer?
-@@ -107,6 +109,9 @@ final class AppModel: ObservableObject {
+@@ -82,7 +84,7 @@ final class AppModel: ObservableObject {
+     }
+     func refreshNetwork() {
+         network = .read()
+-        if network.wifi == nil { connected = false }
++        if network.wifi == nil && !network.tunnel { connected = false }
+     }
+     func notify(_ text: String) { alertText = text; showingAlert = true }
+     func append(_ line: String) {
+@@ -106,7 +108,9 @@ final class AppModel: ObservableObject {
+     private func run(mode: String, title: String) {
          guard canRun else { return }
          refreshNetwork()
-         guard network.wifi != nil else { notify("请先连接 Wi-Fi，并保持 LocalDevVPN 开启。"); return }
+-        guard network.wifi != nil else { notify("请先连接 Wi-Fi，并保持 LocalDevVPN 开启。"); return }
 +        let manualPort: UInt16?
 +        do { manualPort = try RemotePairingPort.manual(targetPort) }
 +        catch { notify(error.localizedDescription); return }
          var address = in_addr()
          guard inet_pton(AF_INET, targetHost, &address) == 1 else { notify("Device IP 格式不正确。"); return }
          guard let resources = Optional(Bundle.main.bundleURL.appendingPathComponent("CarrierPayloads")),
-@@ -114,6 +119,7 @@ final class AppModel: ObservableObject {
+@@ -114,6 +118,7 @@ final class AppModel: ObservableObject {
              notify("应用载荷不完整，请重新导入完整 IPA。"); return
          }
          UserDefaults.standard.set(targetHost, forKey: "deviceIP")
@@ -56,9 +82,11 @@ index ca34a15..1280197 100644
          busy = true; connected = false; progress = 0; current = title
          UIApplication.shared.isIdleTimerDisabled = true
          backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Fast5GA") { }
-@@ -123,30 +129,36 @@ final class AppModel: ObservableObject {
+@@ -122,31 +127,42 @@ final class AppModel: ObservableObject {
+         logURL = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))_\(mode).log")
          FileManager.default.createFile(atPath: logURL!.path, contents: nil)
          append("开启5GA · \(title)")
++        if network.wifi == nil { append("Wi-Fi 未连接：使用已保存配对尝试本机 VPN 通道，不需要互联网。") }
          let pair = Self.pairingURL.path, path = resources.path, host = targetHost
 -        let context = Unmanaged.passRetained(self).toOpaque()
 -        DispatchQueue.global(qos: .userInitiated).async {
@@ -82,7 +110,9 @@ index ca34a15..1280197 100644
 -                        model.notify(mode == "debug_ipcc" ? "原版 73.0 IPCC 已加载。若用于恢复原版，请手动重启手机。" : "\(title)的步骤已完成。未回读测量目标权限或确认网络效果，请在手机上查看。")
 +        Task {
 +            current = "正在发现本机服务端口…"
-+            let endpoint = await portResolver.resolve(host: host, manual: manualPort)
++            let previousPort: UInt16? = UserDefaults.standard.string(forKey: "lastWorkingHost") == host
++                ? UInt16(exactly: UserDefaults.standard.integer(forKey: "lastWorkingPort")) : nil
++            let endpoint = await portResolver.resolve(host: host, manual: manualPort, previousPort: previousPort)
 +            append("Remote Pairing 端点：\(host):\(endpoint.value)（\(endpoint.source)）")
 +            current = title
 +            let context = Unmanaged.passRetained(self).toOpaque()
@@ -99,6 +129,8 @@ index ca34a15..1280197 100644
 +                    UIApplication.shared.isIdleTimerDisabled = false
 +                    if model.backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(model.backgroundTask); model.backgroundTask = .invalid }
 +                    if rc == 0 {
++                        UserDefaults.standard.set(host, forKey: "lastWorkingHost")
++                        UserDefaults.standard.set(Int(endpoint.value), forKey: "lastWorkingPort")
 +                        model.connected = true; model.progress = 1; model.current = mode == "check" ? "连接检查通过" : "操作已完成"
 +                        model.append(model.current)
 +                        if mode != "check" {
@@ -130,10 +162,10 @@ index 54e6c76..0f59d66 100644
  	<key>NSLocalNetworkUsageDescription</key>
 diff --git a/App/RemotePairingPortResolver.swift b/App/RemotePairingPortResolver.swift
 new file mode 100644
-index 0000000..0b992cb
+index 0000000..2598e72
 --- /dev/null
 +++ b/App/RemotePairingPortResolver.swift
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,142 @@
 +import Foundation
 +import Network
 +import Darwin
@@ -149,6 +181,11 @@ index 0000000..0b992cb
 +            throw NSError(domain: "Fast5GA", code: 2, userInfo: [NSLocalizedDescriptionKey: "服务端口应为 1–65535；留空则自动发现。"])
 +        }
 +        return value
++    }
++
++    static func fallback(previous: UInt16?, reason: String) -> Self {
++        if let previous, previous > 0 { return .init(value: previous, source: "上次成功端口；\(reason)") }
++        return .init(value: 49152, source: "默认回退：\(reason)")
 +    }
 +
 +    static func belongsToThisDevice(loopbackInterface: Bool, addresses: Set<String>, localAddresses: Set<String>) -> Bool {
@@ -167,10 +204,12 @@ index 0000000..0b992cb
 +    private var continuation: CheckedContinuation<RemotePairingPort, Never>?
 +    private var deadline: DispatchWorkItem?
 +    private var localAddresses: Set<String> = []
++    private var previousPort: UInt16?
 +    private var fallbackReason = "未发现本机服务"
 +
-+    func resolve(host: String, manual: UInt16?) async -> RemotePairingPort {
++    func resolve(host: String, manual: UInt16?, previousPort: UInt16? = nil) async -> RemotePairingPort {
 +        if let manual { return .init(value: manual, source: "手动设置") }
++        self.previousPort = previousPort
 +        localAddresses = Self.interfaceAddresses()
 +        localAddresses.insert(host)
 +        fallbackReason = "未发现本机服务"
@@ -204,14 +243,15 @@ index 0000000..0b992cb
 +            browser.stateUpdateHandler = { [weak self] state in
 +                MainActor.assumeIsolated {
 +                    if case let .failed(error) = state {
-+                        self?.finish(.init(value: 49152, source: "默认回退：Bonjour \(error)"))
++                        guard let self else { return }
++                        self.finish(RemotePairingPort.fallback(previous: self.previousPort, reason: "Bonjour \(error)"))
 +                    }
 +                }
 +            }
 +            let deadline = DispatchWorkItem { [weak self] in
 +                MainActor.assumeIsolated {
 +                    guard let self else { return }
-+                    self.finish(.init(value: 49152, source: "默认回退：\(self.fallbackReason)"))
++                    self.finish(RemotePairingPort.fallback(previous: self.previousPort, reason: self.fallbackReason))
 +                }
 +            }
 +            self.deadline = deadline
@@ -269,21 +309,30 @@ index 0000000..0b992cb
 +    }
 +}
 diff --git a/App/RootView.swift b/App/RootView.swift
-index 349e134..81e6f91 100644
+index 349e134..478a000 100644
 --- a/App/RootView.swift
 +++ b/App/RootView.swift
+@@ -50,7 +50,7 @@ private struct WriteView: View {
+             }
+             Surface {
+                 Label("使用顺序", systemImage: "sparkles").font(.headline)
+-                Text("首次：连接 Wi-Fi → 配对 → 完整模式。\n以后每次重启手机：执行普通模式。").font(.subheadline).foregroundStyle(.secondary).lineSpacing(6)
++                Text("首次：连接 Wi-Fi → 配对 → 完整模式。\n以后每次重启手机：执行普通模式。\n保存配对后可关闭 Wi-Fi，保持 VPN 开启，再检查连接。").font(.subheadline).foregroundStyle(.secondary).lineSpacing(6)
+                 Divider().overlay(.white.opacity(0.05))
+                 Text("上次完成：\(model.lastResult)").font(.caption).foregroundStyle(.secondary)
+             }
 @@ -127,6 +127,9 @@ private struct PairingView: View {
                  Text("LocalDevVPN 的 Device IP").font(.subheadline.bold())
                  TextField("10.7.0.1", text: $model.targetHost).keyboardType(.decimalPad).textInputAutocapitalization(.never).autocorrectionDisabled().font(.system(.body, design: .monospaced)).disabled(model.busy || manager.running)
                  Text("填写 VPN 中的 Device IP。默认 10.7.0.1；程序不会更改 VPN 配置。").font(.caption).foregroundStyle(.secondary)
 +                Text("Remote Pairing 服务端口").font(.subheadline.bold())
 +                TextField("自动发现（留空）", text: $model.targetPort).keyboardType(.numberPad).font(.system(.body, design: .monospaced)).disabled(model.busy || manager.running)
-+                Text("默认自动发现本机端口。若其他工具能连接，可填写 SideStore 网络发现或 StikDebug 显示的 Remote Pairing 端口；这不是配对时的 PIN，也不是配对主机端口。").font(.caption).foregroundStyle(.secondary)
++                Text("默认自动发现本机端口，发现失败时尝试同一 Device IP 上次成功的端口。若其他工具能连接，可填写 SideStore 网络发现或 StikDebug 显示的 Remote Pairing 端口；这不是配对时的 PIN，也不是配对主机端口。").font(.caption).foregroundStyle(.secondary)
                  Button("检查连接", action: model.check).buttonStyle(.bordered).disabled(!model.canRun)
                  Button("导入已有配对文件") { importing = true }.font(.subheadline).disabled(model.busy || manager.running)
              }
 diff --git a/README.md b/README.md
-index 6b5c298..ce11c4d 100644
+index 6b5c298..cb8dcc8 100644
 --- a/README.md
 +++ b/README.md
 @@ -32,7 +32,7 @@
@@ -295,7 +344,7 @@ index 6b5c298..ce11c4d 100644
  
  仓库直接保存 `App/`、`rust-core/`、`scripts/`、`project.yml` 等可编辑源码。云端从当前提交运行：
  
-@@ -47,6 +47,14 @@ bash scripts/build-ipa.sh
+@@ -47,6 +47,20 @@ bash scripts/build-ipa.sh
  
  源码可以直接克隆到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
  
@@ -303,9 +352,15 @@ index 6b5c298..ce11c4d 100644
 +
 +1.0.1 固定拨号 49152，当前系统的 Remote Pairing 服务若改用其他端口，会出现连接被拒绝，即使其他工具和 VPN 正常。1.0.2 在每次操作前通过 `_remotepairing._tcp` 发现本机服务端口；首次连接、raw RPPairing 回退和缓存均使用选定端口。仅接受本机接口对应的服务，防止使用附近其他设备的端口；发现过程只解析 Bonjour，不打开 Remote Pairing 控制连接。
 +
-+“配对”页面的服务端口留空时自动发现，发现失败回退到 49152 并在日志标明原因。也可填写 SideStore 网络发现或 StikDebug 显示的当前 Remote Pairing 端口。它不是配对 PIN，也不是应用配对主机临时发布的端口。端口变化不意味着配对密钥失效，不必先删除原有配对。
++“配对”页面的服务端口留空时自动发现，发现失败先尝试同一 Device IP 上次成功的端口，无成功记录时回退到 49152，并在日志标明来源。也可填写 SideStore 网络发现或 StikDebug 显示的当前 Remote Pairing 端口。它不是配对 PIN，也不是应用配对主机临时发布的端口。端口变化不意味着配对密钥失效，不必先删除原有配对。
 +
 +连接失败会保留配置 Device IP 的首个错误，并记录实际端点；不再用备用地址的最后一次超时覆盖它，也不再一律判断 VPN 未开启。
++
++### 不连接 Wi-Fi / 飞行模式
++
++保存配对后的检查连接和写入不再要求 Wi-Fi，且载荷均已内置，不需要互联网。首次配对仍在 Wi-Fi 下完成。先在 Wi-Fi 下完成一次连接检查，再保持 LocalDevVPN 开启，开启飞行模式并关闭 Wi-Fi，回到程序检查连接；通过后再写入。自动发现不可用时会尝试同一 Device IP 上次成功的端口，也可手动填写。检查失败则停止，不会将 VPN 接口存在视为服务可用。
++
++此版本仅解除程序的 Wi-Fi 前置限制，并提供本机服务发现和端口回退；尚未在目标 iPhone / iOS 27.0.1 验证飞行模式下新建连接及完整写入。定位工具可保留已经建立的会话，不能仅据此推断新连接和所有服务都可用。
 +
  ## 1.0.1 启动修复
  
@@ -675,10 +730,10 @@ index d9e11a0..00fe990 100644
  print('PASS: all 9 payload hashes, original IPCC, Overlay fields and pairing metadata')
 diff --git a/tests/port-discovery/main.swift b/tests/port-discovery/main.swift
 new file mode 100644
-index 0000000..3eac17f
+index 0000000..4a97fb7
 --- /dev/null
 +++ b/tests/port-discovery/main.swift
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,28 @@
 +import Foundation
 +
 +func check(_ condition: Bool, _ message: String) {
@@ -703,4 +758,7 @@ index 0000000..3eac17f
 +check(!RemotePairingPort.belongsToThisDevice(loopbackInterface: false, addresses: ["192.168.1.20"], localAddresses: ["192.168.1.10"]), "reject a neighbouring device")
 +check(RemotePairingPort.belongsToThisDevice(loopbackInterface: false, addresses: ["192.168.1.10"], localAddresses: ["192.168.1.10"]), "accept this phone's Wi-Fi advertisement")
 +check(RemotePairingPort.belongsToThisDevice(loopbackInterface: true, addresses: [], localAddresses: []), "accept service scoped to the local loopback interface")
-+print("PASS: port overrides, invalid input, and local-device discovery selection")
++
++check(RemotePairingPort.fallback(previous: 52107, reason: "offline").value == 52107, "reuse previously successful dynamic port when offline discovery is unavailable")
++check(RemotePairingPort.fallback(previous: nil, reason: "offline").value == 49152, "default port only when no successful port is known")
++print("PASS: port overrides, local-device selection and offline port fallback")
