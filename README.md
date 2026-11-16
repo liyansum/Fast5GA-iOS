@@ -49,7 +49,7 @@ bash scripts/build-ipa.sh
 
 ## 1.0.2 连接修复
 
-1.0.1 固定拨号 49152，当前系统的 Remote Pairing 服务若改用其他端口，会出现连接被拒绝，即使其他工具和 VPN 正常。1.0.2 在每次操作前通过 `_remotepairing._tcp` 发现本机服务端口；首次连接、raw RPPairing 回退和缓存均使用选定端口。仅接受本机接口对应的服务，防止使用附近其他设备的端口；发现过程只解析 Bonjour，不打开 Remote Pairing 控制连接。
+1.0.1 固定拨号 49152，当前系统的 Remote Pairing 服务若改用其他端口，会出现连接被拒绝，即使其他工具和 VPN 正常。1.0.2 在每次操作前通过 `_remotepairing._tcp` 发现本机服务端口；优先通过 raw RPPairing 连接该服务，RemoteXPC 只作兼容回退；首次连接和缓存均使用选定端口。仅接受本机接口对应的服务，防止使用附近其他设备的端口；发现过程只解析 Bonjour，不打开 Remote Pairing 控制连接。
 
 “配对”页面的服务端口留空时自动发现，发现失败先尝试同一 Device IP 上次成功的端口，无成功记录时回退到 49152，并在日志标明来源。也可填写 SideStore 网络发现或 StikDebug 显示的当前 Remote Pairing 端口。它不是配对 PIN，也不是应用配对主机临时发布的端口。端口变化不意味着配对密钥失效，不必先删除原有配对。
 
