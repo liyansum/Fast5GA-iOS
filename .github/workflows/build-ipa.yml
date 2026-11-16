@@ -14,18 +14,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-      - name: Apply reviewed connection fix
-        if: hashFiles('fast5ga-1.0.2.patch') != ''
-        run: |
-          set -euo pipefail
-          git apply --check fast5ga-1.0.2.patch
-          git apply fast5ga-1.0.2.patch
-          git rm fast5ga-1.0.2.patch
-          git add .
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Fix dynamic Remote Pairing ports for Fast5GA 1.0.2'
-          git push origin HEAD:main
       - name: Check Xcode
         run: |
           xcodebuild -version
