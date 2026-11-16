@@ -19,7 +19,7 @@
 | 模式 | 执行顺序 |
 | --- | --- |
 | 完整模式 | 原版 73.0 IPCC → 检查 /var 目录 → 三件套 0644 → 其他三个 Bundle 文件 0600 → 两个 Overlay 0555 → 重载 CommCenter → 补写两个 Overlay 0555 |
-| 普通模式 | 两个 Overlay 0555 → 重载 CommCenter → 补写两个 Overlay 0555 |
+| 普通模式 | 两个 Overlay 0555 → 重载 CommCenter → 结束（1.0.3 起不再补写） |
 | 调试 1 | 仅加载原版 IPCC，并检查 /var 目录 |
 | 调试 2 | 检查目录，写入三件套 0644 |
 | 调试 3 | 检查目录，写入其他三个文件 0600 |
@@ -46,6 +46,14 @@ bash scripts/build-ipa.sh
 在仓库的 **Releases** 中打开最新版本，分别下载 `Fast5GA.ipa` 和 `SHA256SUMS.txt`。两个文件直接作为附件发布，无需到 Actions 下载或解压产物 ZIP。构建和 CFBundle 路径检查通过后才会发布。
 
 源码可以直接克隆到本地，在安装 Xcode、Rust 1.100.0、XcodeGen 的 Mac 上构建。`project.yml` 生成 Xcode 工程，`Cargo.lock` 固定依赖。
+
+## 1.0.3 普通模式与路由重试
+
+普通模式按最新要求仅执行：写入两个 Overlay → 重载 CommCenter → 结束。完整模式仍保留重载后的补写，调试选项不变。
+
+针对飞行模式下 TCP 报 Network is unreachable，连接遇到系统无路由时才重新枚举活动 IPv4 VPN 接口，优先选择目标地址匹配的 utun/ipsec 接口，并对该 socket 使用 IP_BOUND_IF 重试。初始配对、兼容 RemoteXPC 和后续 TLS socket 使用相同逻辑；不修改系统路由，也不更改 VPN 配置。端口被拒绝或配对校验错误不会触发这个重试。总建链时间允许 30 秒，覆盖底层 18 秒重试预算。
+
+日志会记录匹配的接口与实际错误，并区分隧道、设备身份、进程服务及 AFC 文件服务。飞行模式下能否在目标设备成功建链、写入仍需实机确认；没有活动 VPN 接口或系统拒绝绑定时，程序无法凭空创建可用路由。
 
 ## 1.0.2 连接修复
 
