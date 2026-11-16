@@ -67,7 +67,7 @@ fn plan(mode: &str) -> Result<Vec<Step>, String> {
             Write(6),
             Write(7),
         ],
-        "normal" => vec![Write(6), Write(7), Reload, Write(6), Write(7)],
+        "normal" => vec![Write(6), Write(7), Reload],
         "debug_ipcc" => vec![Install],
         "debug_bundle" => vec![Directory, Write(0), Write(1), Write(2)],
         "debug_aux" => vec![Directory, Write(3), Write(4), Write(5)],
@@ -738,7 +738,9 @@ async fn run(mode: String, pairing: String, dir: String, l: Logger) -> Result<St
     let files = payloads(Path::new(&dir))?;
     l.log("载荷校验通过");
     let bytes = std::fs::read(&pairing).map_err(err)?;
+    l.log("连接阶段：建立配对隧道");
     let mut t = connect_tunnel(&bytes, &l).await?;
+    l.log("连接阶段：隧道已建立，读取设备身份");
     // Read-only identity check through the authenticated channel, before any Media changes.
     let mut ld = match &mut t {
         AppDeviceTunnel::Rsd { adapter, handshake } => handshake
@@ -760,6 +762,7 @@ async fn run(mode: String, pairing: String, dir: String, l: Logger) -> Result<St
     l.log("已连接 iPhone 14 Pro · iOS 27.0.1");
     // Preflight reload capability before either normal/full mode mutates files.
     let mut app = if mode == "check" || steps.contains(&Step::Reload) {
+        l.log("连接阶段：检查 CoreDevice 进程服务");
         let AppDeviceTunnel::Rsd { adapter, handshake } = &mut t else {
             unreachable!()
         };
@@ -778,6 +781,7 @@ async fn run(mode: String, pairing: String, dir: String, l: Logger) -> Result<St
     } else {
         None
     };
+    l.log("连接阶段：检查 AFC 文件服务");
     let mut afc = t.connect_afc(&l).await?;
     let active = afc
         .list_dir("/")
@@ -869,18 +873,18 @@ pub unsafe extern "C" fn fg_run(
 mod tests {
     use super::*;
     #[test]
-    fn menus_match_batch() {
+    fn requested_normal_sequence_preserves_full_and_debug() {
         assert_eq!(
             plan("normal").unwrap(),
             vec![
                 Step::Write(6),
                 Step::Write(7),
                 Step::Reload,
-                Step::Write(6),
-                Step::Write(7)
             ]
         );
-        assert_eq!(plan("full").unwrap().len(), 12);
+        let full = plan("full").unwrap();
+        assert_eq!(full.len(), 12);
+        assert_eq!(&full[9..], &[Step::Reload, Step::Write(6), Step::Write(7)]);
         assert_eq!(plan("debug_reload").unwrap(), vec![Step::Reload]);
         assert_eq!(
             plan("debug_bundle").unwrap(),
